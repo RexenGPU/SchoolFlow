@@ -10,7 +10,8 @@
     "dev:vite": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "node scripts/patch-pawnote.mjs"
   },
   "dependencies": {
     "framer-motion": "^13.4.0",

@@ -84,7 +84,7 @@ function normalize(record: ApiRecord, origin?: { latitude: number; longitude: nu
   const website = record.web?.trim() || undefined
   const rne = record.identifiant_de_l_etablissement?.trim().toUpperCase()
   const hostedPronoteUrl = rne && /^[A-Z0-9]{7,8}$/.test(rne)
-    ? `https://${rne}.index-education.net/pronote/`
+    ? `https://${rne.toLowerCase()}.index-education.net/pronote/`
     : undefined
   const pronoteUrl = website && /index-education\.net/i.test(website) && /pronote/i.test(website)
     ? website

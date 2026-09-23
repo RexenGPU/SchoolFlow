@@ -88,7 +88,7 @@ function errorPayload(err) {
     return { error: 'unreachable', message: 'Serveur Pronote injoignable.' }
   }
   if (err instanceof PageUnavailableError) {
-    return { error: 'page_unavailable', message: "Page Pronote indisponible (identifiants refusés ou instance non compatible)." }
+    return { error: 'page_unavailable', message: "URL Pronote incorrecte ou page d'authentification introuvable. Vérifiez l'adresse de votre établissement (souvent …/pronote/ ou …/pronote/eleve.html)." }
   }
   if (err instanceof BusyPageError) {
     return { error: 'busy', message: 'Serveur Pronote temporairement indisponible.' }
