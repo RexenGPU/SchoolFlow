@@ -15,6 +15,7 @@ export interface Establishment {
   longitude: number
   website?: string
   pronoteUrl?: string
+  pronoteCandidates?: string[]
   distanceKm?: number
 }
 
@@ -90,6 +91,11 @@ function normalize(record: ApiRecord, origin?: { latitude: number; longitude: nu
     ? website
     : hostedPronoteUrl
 
+  const candidates = [
+    ...(website && /pronote|index-education/i.test(website) ? [website] : []),
+    ...(hostedPronoteUrl ? [hostedPronoteUrl] : []),
+  ]
+
   return {
     id: record.identifiant_de_l_etablissement || `${record.nom_etablissement}-${record.code_postal ?? ''}`,
     name: record.nom_etablissement,
@@ -101,7 +107,8 @@ function normalize(record: ApiRecord, origin?: { latitude: number; longitude: nu
     latitude,
     longitude,
     website,
-    pronoteUrl,
+    pronoteUrl: pronoteUrl ?? candidates[0],
+    pronoteCandidates: candidates,
     distanceKm: origin ? haversineKm(origin.latitude, origin.longitude, latitude, longitude) : undefined,
   }
 }
@@ -114,7 +121,7 @@ export async function searchEstablishments(options: {
   const params = new URLSearchParams({
     limit: '100',
     select:
-      'identifiant_de_l_etablissement,nom_etablissement,type_etablissement,etat,adresse_1,adresse_2,adresse_3,code_postal,nom_commune,latitude,longitude,position,web',
+      'identifiant_de_l_etablissement,nom_etablissement,type_etablissement,etat,adresse_1,adresse_2,adresse_3,code_postal,code_departement,nom_commune,latitude,longitude,position,web',
   })
   params.set('refine', 'etat:OUVERT')
   if (options.type && options.type !== 'all') params.append('refine', `type_etablissement:${options.type}`)

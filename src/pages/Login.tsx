@@ -19,6 +19,7 @@ import { useAuth } from '../providers/AuthProvider'
 import { useToast } from '../providers/ToastProvider'
 import { PROVIDER_UNCONFIGURED_MESSAGE } from '../services/auth'
 import { useHotkey } from '../hooks'
+import { probePronoteUrl } from '../services/pronoteApi'
 import {
   searchCities,
   searchEstablishments,
@@ -114,13 +115,40 @@ export function LoginPage() {
     void findEstablishments(city)
   }
 
-  function selectEstablishment(establishment: Establishment) {
+  async function selectEstablishment(establishment: Establishment) {
     setSelectedEstablishmentId(establishment.id)
-    setPronote((current) => ({ ...current, url: establishment.pronoteUrl ?? current.url }))
-    if (!establishment.pronoteUrl) {
+    const candidates = establishment.pronoteCandidates?.length
+      ? establishment.pronoteCandidates
+      : establishment.pronoteUrl
+        ? [establishment.pronoteUrl]
+        : []
+    if (candidates.length === 0) {
       setEstablishmentError('Établissement sélectionné. Demandez-lui l’URL exacte de son portail Pronote.')
-    } else {
-      setEstablishmentError(null)
+      return
+    }
+    setEstablishmentError(null)
+    setPronote((current) => ({ ...current, url: candidates[0] }))
+    setEstablishmentLoading(true)
+    try {
+      const results = await Promise.all(candidates.map((url) => probePronoteUrl(url, pronote.kind)))
+      const hit = results.find((r) => r.ok)
+      if (hit?.base || hit?.url) {
+        const next = hit.base || hit.url || candidates[0]
+        setPronote((current) => ({ ...current, url: next }))
+        if (hit.cas) {
+          setEstablishmentError(`${establishment.name} passe par un ENT (portail académique).`)
+        } else {
+          setEstablishmentError(
+            `Pronote détecté${hit.establishmentName ? ` · ${hit.establishmentName}` : ''}${hit.version ? ` · v${hit.version}` : ''}.`,
+          )
+        }
+      } else {
+        setEstablishmentError(
+          `Aucune page Pronote mobile trouvée pour ${establishment.name}. Vérifiez l'URL manuellement si l'établissement en fournit une.`,
+        )
+      }
+    } finally {
+      setEstablishmentLoading(false)
     }
   }
 

@@ -32,9 +32,92 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 12
 const LOGIN_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_MAX_ATTEMPTS = 30
 const KINDS = { student: AccountKind.STUDENT, parent: AccountKind.PARENT, teacher: AccountKind.TEACHER }
+const MOBILE_PAGE = { student: 'mobile.eleve.html', parent: 'mobile.parent.html', teacher: 'mobile.professeur.html' }
+const MOBILE_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 PRONOTE Mobile APP Version/2.0.11'
 
 const sessions = new Map()
 const loginAttempts = new Map()
+
+function stripHtml(url) {
+  try {
+    const u = new URL(String(url))
+    const parts = u.pathname.split('/').filter(Boolean)
+    const last = parts[parts.length - 1] || ''
+    if (last.includes('.html')) parts.pop()
+    let pathname = parts.join('/')
+    if (pathname && !pathname.startsWith('/')) pathname = `/${pathname}`
+    if (pathname.endsWith('/pronote') || pathname === '/pronote' || pathname === '') {
+      u.pathname = pathname || '/pronote'
+    } else if (!pathname.endsWith('/pronote')) {
+      u.pathname = pathname ? `${pathname.replace(/\/$/, '')}/pronote` : '/pronote'
+    }
+    u.search = ''
+    u.hash = ''
+    const href = u.href
+    return href.endsWith('/') ? href.slice(0, -1) : href
+  } catch {
+    return String(url || '').replace(/\/+$/, '')
+  }
+}
+
+function candidateUrls(rawUrl, kind = 'student') {
+  const base = stripHtml(rawUrl)
+  const page = MOBILE_PAGE[kind] || MOBILE_PAGE.student
+  const list = [
+    `${base}/`,
+    `${base}/eleve.html`,
+    `${base}/parent.html`,
+    `${base}/professeur.html`,
+    `${base}/mobile.eleve.html`,
+    `${base}/${page}`,
+  ]
+  return [...new Set(list.map((u) => u.replace(/([^:]\/)\/+/g, '$1')))]
+}
+
+async function probePronotePage(url) {
+  try {
+    const res = await fetch(url, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(12000),
+      headers: { 'User-Agent': MOBILE_UA, Cookie: 'appliMobile=1' },
+    })
+    if (!res.ok) return null
+    const text = await res.text()
+    const version = text.match(/>PRONOTE (?<version>\d+\.\d+\.\d+)/)?.groups?.version
+    const hasStart = /Start\s*\(/.test(text)
+    if (!version && !hasStart) return null
+    let cas = false
+    let establishmentName
+    try {
+      const infoUrl = new URL('infoMobileApp.json?id=0D264427-EEFC-4810-A9E9-346942A862A4', url.endsWith('/') ? url : `${url}/`)
+      const infoRes = await fetch(infoUrl, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': MOBILE_UA } })
+      if (infoRes.ok) {
+        const info = await infoRes.json()
+        cas = Boolean(info?.CAS?.actif)
+        establishmentName = info?.nomEtab
+      }
+    } catch {
+      /* info is optional */
+    }
+    return { ok: true, url, version, cas, establishmentName }
+  } catch {
+    return null
+  }
+}
+
+async function resolvePronoteUrl(rawUrl, kind = 'student') {
+  const primary = stripHtml(rawUrl)
+  const primaryProbe = await probePronotePage(`${primary}/`)
+  if (primaryProbe) return { ...primaryProbe, base: primary }
+
+  for (const candidate of candidateUrls(rawUrl, kind)) {
+    if (candidate === `${primary}/`) continue
+    const probed = await probePronotePage(candidate)
+    if (probed) return { ...probed, base: primary }
+  }
+  return { ok: false, base: primary }
+}
 
 function pruneSessions() {
   const now = Date.now()
@@ -117,6 +200,24 @@ function readBody(req) {
   })
 }
 
+async function handleProbe(req, res) {
+  const body = await readBody(req)
+  const url = typeof body.url === 'string' ? body.url.trim() : ''
+  const kind = KINDS[body.kind] ? body.kind : 'student'
+  if (!url) return json(res, 400, { error: 'bad_request', message: 'Paramètre url manquant.' })
+  const started = Date.now()
+  const resolved = await resolvePronoteUrl(url, kind)
+  console.log(`[pronote] probe host=${(() => { try { return new URL(resolved.base || url).host } catch { return 'invalid' } })()} ok=${resolved.ok} cas=${resolved.cas} ms=${Date.now() - started}`)
+  if (!resolved.ok) {
+    return json(res, 404, {
+      error: 'pronote_not_found',
+      message: "Impossible de trouver une page Pronote mobile pour cette adresse. Essayez l'URL exacte communiquée par l'établissement.",
+      base: resolved.base,
+    })
+  }
+  return json(res, 200, resolved)
+}
+
 async function handleLogin(req, res) {
   const retryAfter = consumeLoginAttempt(req)
   if (retryAfter !== null) {
@@ -124,7 +225,8 @@ async function handleLogin(req, res) {
     return json(res, 429, { error: 'rate_limited', message: 'Trop de tentatives. Réessayez plus tard.' })
   }
   const body = await readBody(req)
-  const { url, kind, username, password, deviceUUID } = body
+  const { kind, username, password, deviceUUID } = body
+  let url = typeof body.url === 'string' ? body.url.trim() : ''
   if (!url || !username || !password || !KINDS[kind]) {
     return json(res, 400, { error: 'bad_request', message: 'Paramètres manquants (url, kind, username, password).' })
   }
@@ -137,10 +239,25 @@ async function handleLogin(req, res) {
     }
   })()
   console.log(`[pronote] login attempt host=${host} kind=${kind} ip=${requestIp(req)}`)
+  const resolved = await resolvePronoteUrl(url, kind)
+  if (!resolved.ok) {
+    console.log(`[pronote] login resolve fail host=${host} ms=${Date.now() - started}`)
+    return json(res, 401, {
+      error: 'page_unavailable',
+      message: "URL Pronote incorrecte ou page d'authentification introuvable. Vérifiez l'adresse de votre établissement (souvent …/pronote/ ou …/pronote/eleve.html).",
+    })
+  }
+  if (resolved.cas) {
+    return json(res, 403, {
+      error: 'ent_required',
+      message: "Cet établissement passe par un ENT (portail académique). La connexion directe Pronote n'est pas possible ici. Utilisez le compte local SCHOOLFLOW ou l'URL Pronote directe si votre établissement en fournit une.",
+    })
+  }
+  url = resolved.base
   const session = createSessionHandle()
   try {
     await loginCredentials(session, {
-      url: body.url,
+      url,
       kind: KINDS[kind],
       username,
       password,
@@ -155,13 +272,13 @@ async function handleLogin(req, res) {
       firstName: (session.user?.name || username).split(' ')[0] || username,
       lastName: (session.user?.name || username).split(' ').slice(1).join(' ') || '',
       role: kind === 'teacher' ? 'teacher' : 'student',
-      establishment: info?.establishmentName || 'Pronote',
+      establishment: info?.establishmentName || resolved.establishmentName || 'Pronote',
       email: acc?.email || undefined,
       avatarHue: [...username].reduce((a, c) => a + c.charCodeAt(0), 0) % 360,
     }
     const sessionId = randomUUID()
     sessions.set(sessionId, { session, user, kind, url: body.url, expiresAt: Date.now() + SESSION_TTL_MS })
-    return json(res, 200, { sessionId, user })
+    return json(res, 200, { sessionId, user, pronoteUrl: url, version: resolved.version })
   } catch (err) {
     const status =
       err instanceof SecurityError ? 403 :
@@ -301,12 +418,21 @@ const server = http.createServer((req, res) => {
     return res.end()
   }
   const path = new URL(req.url, `http://localhost:${PORT}`).pathname
+  if (path === '/api/version' && (req.method === 'GET' || req.method === 'HEAD')) {
+    return json(res, 200, {
+      ok: true,
+      build: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'local',
+      at: new Date().toISOString(),
+    })
+  }
   if (req.method === 'GET' || req.method === 'HEAD') return serveStatic(req, res)
   if (req.method !== 'POST') return json(res, 405, { error: 'method_not_allowed' })
   const handlers = {
     '/api/pronote/login': handleLogin,
     '/api/pronote/data': handleData,
     '/api/pronote/logout': handleLogout,
+    '/api/pronote/probe': handleProbe,
+    '/api/version': (_req, res) => json(res, 200, { ok: true, build: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'local', at: new Date().toISOString() }),
   }
   const handler = handlers[path]
   if (!handler) return json(res, 404, { error: 'not_found' })

@@ -12,3 +12,31 @@ export function pronoteApiUrl(path: string): string {
   }
   return path
 }
+
+export interface PronoteProbeResult {
+  ok: boolean
+  base?: string
+  url?: string
+  version?: string
+  cas?: boolean
+  establishmentName?: string
+  message?: string
+}
+
+export async function probePronoteUrl(url: string, kind: string): Promise<PronoteProbeResult> {
+  try {
+    const res = await fetch(pronoteApiUrl('/api/pronote/probe'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, kind }),
+    })
+    const text = await res.text()
+    try {
+      return (text ? JSON.parse(text) : {}) as PronoteProbeResult
+    } catch {
+      return { ok: false, message: `Réponse invalide du serveur (${res.status}).` }
+    }
+  } catch {
+    return { ok: false, message: 'Serveur SCHOOLFLOW injoignable.' }
+  }
+}
