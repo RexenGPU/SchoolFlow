@@ -360,7 +360,7 @@ export function LoginPage() {
                 required
                 value={pronote.password}
                 onChange={(e) => setPronote((p) => ({ ...p, password: e.target.value }))}
-                hint="Transmis uniquement vers votre serveur Pronote via localhost — jamais vers un serveur distant SCHOOLFLOW."
+                hint="Utilisé uniquement pour ouvrir votre session Pronote. Les identifiants ne sont pas conservés sur le serveur."
               />
               <p className="text-xs leading-5 text-ink-3">
                 L’adresse, l’identifiant et le mot de passe sont ceux de votre établissement.{' '}
@@ -503,8 +503,8 @@ export function LoginPage() {
             <p className="flex items-start gap-2 rounded-2xl bg-accent-softer px-3 py-2.5 text-[11px] leading-relaxed text-ink-2">
               <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-accent" aria-hidden />
               <span>
-                {PROVIDER_UNCONFIGURED_MESSAGE} EduConnect n'est pas encore configuré. Les identifiants Pronote
-                ne quittent jamais votre machine (passerelle locale : port 3210).
+                {PROVIDER_UNCONFIGURED_MESSAGE} EduConnect n'est pas encore configuré. La connexion Pronote
+                s'effectue via le serveur SCHOOLFLOW, qui n'enregistre pas vos identifiants.
               </span>
             </p>
           </div>
@@ -526,7 +526,7 @@ export function LoginPage() {
 
         <p className="mt-6 text-center text-[11px] leading-relaxed text-ink-3/90">
           <Plus className="mr-1 inline size-3" aria-hidden />
-          L'authentification Pronote s'effectue via une passerelle locale (aucun CAPTCHA n'est contourné ;
+          L'authentification Pronote s'effectue via le serveur SCHOOLFLOW (aucun CAPTCHA n'est contourné ;
           une vérification 2FA demandée par Pronote vous est signalée honnêtement).
         </p>
       </motion.div>

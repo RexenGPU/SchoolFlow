@@ -30,7 +30,7 @@ const HOST = process.env.PRONOTE_SERVER_HOST || '0.0.0.0'
 const DIST_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist')
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12
 const LOGIN_WINDOW_MS = 15 * 60 * 1000
-const LOGIN_MAX_ATTEMPTS = 10
+const LOGIN_MAX_ATTEMPTS = 30
 const KINDS = { student: AccountKind.STUDENT, parent: AccountKind.PARENT, teacher: AccountKind.TEACHER }
 
 const sessions = new Map()
@@ -51,7 +51,8 @@ function pruneLoginAttempts(now = Date.now()) {
 
 function requestIp(req) {
   const forwarded = req.headers['x-forwarded-for']
-  return (typeof forwarded === 'string' ? forwarded.split(',')[0] : req.socket.remoteAddress) || 'unknown'
+  const first = typeof forwarded === 'string' ? forwarded.split(',').map((p) => p.trim()).filter(Boolean)[0] : null
+  return first || req.socket.remoteAddress || 'unknown'
 }
 
 function consumeLoginAttempt(req) {
@@ -127,6 +128,15 @@ async function handleLogin(req, res) {
   if (!url || !username || !password || !KINDS[kind]) {
     return json(res, 400, { error: 'bad_request', message: 'Paramètres manquants (url, kind, username, password).' })
   }
+  const started = Date.now()
+  const host = (() => {
+    try {
+      return new URL(String(url)).host
+    } catch {
+      return 'invalid-url'
+    }
+  })()
+  console.log(`[pronote] login attempt host=${host} kind=${kind} ip=${requestIp(req)}`)
   const session = createSessionHandle()
   try {
     await loginCredentials(session, {
@@ -136,6 +146,7 @@ async function handleLogin(req, res) {
       password,
       deviceUUID: deviceUUID || randomUUID(),
     })
+    console.log(`[pronote] login ok host=${host} ms=${Date.now() - started}`)
     const info = sessionInformation(session)
     const acc = await account(session).catch(() => null)
     const user = {
@@ -158,6 +169,7 @@ async function handleLogin(req, res) {
       err instanceof PageUnavailableError ? 401 :
       err instanceof SuspendedIPError ? 429 :
       502
+    console.log(`[pronote] login fail host=${host} ms=${Date.now() - started} status=${status} name=${err?.name} msg=${err?.message}`)
     return json(res, status, errorPayload(err))
   }
 }

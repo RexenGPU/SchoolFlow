@@ -122,9 +122,18 @@ export class PronoteAuthProvider extends ExternalAuthProvider {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, kind, username, password }),
       })
-      const data = (await res.json()) as { sessionId?: string; user?: User; message?: string; error?: string }
+      const text = await res.text()
+      let data: { sessionId?: string; user?: User; message?: string; error?: string } = {}
+      try {
+        data = text ? (JSON.parse(text) as typeof data) : {}
+      } catch {
+        return { ok: false, error: `Réponse invalide du serveur (${res.status}). Réessayez dans un instant.` }
+      }
       if (!res.ok || !data.sessionId || !data.user) {
-        return { ok: false, error: data.message ?? 'Connexion Pronote impossible.' }
+        return {
+          ok: false,
+          error: data.message ?? `Connexion Pronote impossible (HTTP ${res.status}${data.error ? ` · ${data.error}` : ''}).`,
+        }
       }
       const user: User = { ...data.user, role: data.user.role === 'teacher' ? 'teacher' : 'student' }
       if (input?.remember === 'true' || input?.remember === 'on') {
@@ -134,7 +143,10 @@ export class PronoteAuthProvider extends ExternalAuthProvider {
       const session = this.acceptExternalSession(user)
       return { ok: true, session, user }
     } catch {
-      return { ok: false, error: 'Serveur local Pronote introuvable. Lancez `npm run server`.' }
+      return {
+        ok: false,
+        error: 'Impossible de contacter le serveur SCHOOLFLOW. Vérifiez votre connexion puis réessayez.',
+      }
     }
   }
 
